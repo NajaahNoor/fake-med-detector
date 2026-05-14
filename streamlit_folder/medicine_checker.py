@@ -1,8 +1,9 @@
-import streamlit as st
+import html
+import mimetypes
+import os
+
 import requests
-import base64
-import json
-from pathlib import Path
+import streamlit as st
 
 # ─────────────────────────────────────────────
 #  Page config — must be first Streamlit call
@@ -385,26 +386,102 @@ with col_prev:
 st.markdown("</div>", unsafe_allow_html=True)  # close upload-card
 
 # ─────────────────────────────────────────────
-#  Backend call + result display
+#  Backend — Fake Medicine Detector FastAPI
 # ─────────────────────────────────────────────
-BACKEND_URL = "http://localhost:8000/verify"   # ← change to your deployed URL
+API_BASE = os.environ.get("FAKE_MED_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 
-def call_backend(image_bytes: bytes, filename: str, reg_number: str = "") -> dict:
-    """
-    POST to the backend.
-    Expected JSON response shape:
-    {
-        "verdict": "Verified" | "Suspicious" | "Counterfeit",
-        "summary": "<plain-text explanation>",
-        "reg_number": "<extracted or provided reg number>",
-        "risk_score": 0-100          # optional
+
+def _verdict_display(api_verdict: str | None, status: str) -> str:
+    """Map API verdict / status to Streamlit badge keys."""
+    if status == "error" or not api_verdict:
+        return "Error"
+    v = str(api_verdict).strip().upper()
+    return {
+        "VERIFIED": "Verified",
+        "SUSPICIOUS": "Suspicious",
+        "COUNTERFEIT": "Counterfeit",
+    }.get(v, v.title())
+
+
+def map_api_response(payload: dict) -> dict:
+    """Normalize FastAPI AnalysisResponse for this UI."""
+    status = payload.get("status") or "success"
+    verdict_key = _verdict_display(payload.get("verdict"), status)
+    message = payload.get("message") or "No details returned from the API."
+    reg = payload.get("registration_number") or "—"
+    flags = payload.get("flags") or []
+    risk = payload.get("risk_score")
+    conf = payload.get("confidence")
+    extras = []
+    if risk is not None:
+        extras.append(f"Risk score: **{risk}**/100")
+    if conf is not None:
+        extras.append(f"OCR confidence: **{float(conf):.0%}**")
+    if flags:
+        extras.append("Flags: " + "; ".join(str(f) for f in flags))
+    summary = message
+    if extras:
+        summary = message + "\n\n" + " · ".join(extras)
+    return {
+        "verdict": verdict_key,
+        "summary": summary,
+        "reg_number": reg,
+        "risk_score": risk,
+        "flags": flags,
+        "complaint_draft": payload.get("complaint_draft"),
     }
+
+
+def call_analysis_api(
+    image_bytes: bytes | None,
+    filename: str,
+    manual_reg: str,
+    timeout_s: int = 120,
+) -> dict:
     """
-    files   = {"image": (filename, image_bytes, "image/jpeg")}
-    data    = {"reg_number": reg_number}
-    response = requests.post(BACKEND_URL, files=files, data=data, timeout=60)
-    response.raise_for_status()
-    return response.json()
+    Call the packaged FastAPI service:
+    - POST /api/upload-and-analyze when an image is present
+    - POST /api/analyze with JSON when only a registration number is provided
+    """
+    reg = (manual_reg or "").strip()
+    if image_bytes:
+        mime, _ = mimetypes.guess_type(filename)
+        mime = mime or "application/octet-stream"
+        files = {"file": (filename or "upload.jpg", image_bytes, mime)}
+        data = {}
+        if reg:
+            data["registration_number"] = reg
+        response = requests.post(
+            f"{API_BASE}/api/upload-and-analyze",
+            files=files,
+            data=data or None,
+            timeout=timeout_s,
+        )
+    else:
+        response = requests.post(
+            f"{API_BASE}/api/analyze",
+            json={"registration_number": reg or None},
+            timeout=timeout_s,
+        )
+    try:
+        payload = response.json()
+    except ValueError:
+        response.raise_for_status()
+        raise RuntimeError("API returned non-JSON body") from None
+
+    if response.ok:
+        return map_api_response(payload)
+
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, list):
+        detail = "; ".join(str(d.get("msg", d)) for d in detail)
+    msg = detail or str(payload)
+    return {
+        "verdict": "Error",
+        "summary": f"API error ({response.status_code}):\n{msg}",
+        "reg_number": reg or "—",
+        "complaint_draft": None,
+    }
 
 
 if submit:
@@ -415,51 +492,53 @@ if submit:
             try:
                 if uploaded_file:
                     img_bytes = uploaded_file.read()
-                    fname     = uploaded_file.name
+                    fname = uploaded_file.name
                 else:
-                    img_bytes = b""
-                    fname     = "none.jpg"
+                    img_bytes = None
+                    fname = ""
 
-                result = call_backend(img_bytes, fname, manual_reg.strip())
-                st.session_state.result  = result
+                result = call_analysis_api(img_bytes, fname, manual_reg)
+                st.session_state.result = result
                 st.session_state.verdict = result.get("verdict", "Unknown")
 
             except requests.exceptions.ConnectionError:
-                st.session_state.result  = {
+                st.session_state.result = {
                     "verdict": "Error",
                     "summary": (
-                        "Could not reach the verification server.\n\n"
-                        "Make sure your backend is running at:\n"
-                        f"  {BACKEND_URL}\n\n"
-                        "Update the BACKEND_URL variable in this file to match your deployment."
+                        "Could not reach the verification API.\n\n"
+                        "Start the FastAPI app from the project root, for example:\n"
+                        "  `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`\n\n"
+                        f"Expected base URL: **{API_BASE}** (override with env `FAKE_MED_API_BASE`)."
                     ),
-                    "reg_number": manual_reg or "—",
+                    "reg_number": manual_reg.strip() or "—",
                 }
                 st.session_state.verdict = "Error"
             except Exception as e:
-                st.session_state.result  = {
+                st.session_state.result = {
                     "verdict": "Error",
                     "summary": f"An unexpected error occurred:\n{str(e)}",
-                    "reg_number": manual_reg or "—",
+                    "reg_number": manual_reg.strip() or "—",
                 }
                 st.session_state.verdict = "Error"
 
 # ─────── Show result ───────
 if st.session_state.result:
-    r       = st.session_state.result
+    r = st.session_state.result
     verdict = r.get("verdict", "Unknown")
     summary = r.get("summary", "No details returned from backend.")
-    reg_no  = r.get("reg_number", manual_reg or "—")
+    reg_no = r.get("reg_number", manual_reg.strip() or "—")
+    reg_safe = html.escape(str(reg_no))
 
     badge_map = {
-        "Verified":    ("✅", "verdict-ok",   "Verified"),
-        "Suspicious":  ("⚠️", "verdict-warn", "Suspicious"),
-        "Counterfeit": ("🚨", "verdict-bad",  "Counterfeit"),
-        "Error":       ("❌", "verdict-bad",  "Error"),
+        "Verified": ("✅", "verdict-ok", "Verified"),
+        "Suspicious": ("⚠️", "verdict-warn", "Suspicious"),
+        "Counterfeit": ("🚨", "verdict-bad", "Counterfeit"),
+        "Error": ("❌", "verdict-bad", "Error"),
     }
     icon, cls, label = badge_map.get(verdict, ("❓", "verdict-warn", verdict))
 
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="result-wrap">
         <div class="card-label">Verification Result</div>
 
@@ -471,15 +550,17 @@ if st.session_state.result:
             Registration Number Checked
         </div>
         <div style="font-size:1.05rem; font-weight:600; color:var(--navy); margin-bottom:1.4rem; font-family:monospace;">
-            {reg_no}
+            {reg_safe}
         </div>
 
         <div style="margin-bottom:.5rem; font-size:.8rem; color:var(--muted); font-weight:600; letter-spacing:.08em; text-transform:uppercase;">
             Summary
         </div>
-        <div class="result-summary">{summary}</div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(summary)
 
     # Advice box for flagged drugs
     if verdict == "Counterfeit":

@@ -1,0 +1,4 @@
+# Avoid writing ~/.streamlit (e.g. machine_id_v4) when home is not writable.
+# See streamlit/runtime/metrics_util.py: _get_machine_id_v4.
+[browser]
+gatherUsageStats = false
