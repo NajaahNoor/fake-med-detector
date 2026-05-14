@@ -6,7 +6,7 @@ Main analysis endpoints.
 
 import os
 import uuid
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 from app.schemas.analysis import AnalysisRequest, AnalysisResponse
 from app.services.pipeline import pipeline
 from app.core.config import settings
@@ -75,7 +75,10 @@ async def analyze_drug(request: AnalysisRequest):
 
 
 @router.post("/upload-and-analyze", response_model=AnalysisResponse)
-async def upload_and_analyze(file: UploadFile = File(...)):
+async def upload_and_analyze(
+    file: UploadFile = File(...),
+    registration_number: str | None = Form(None),
+):
     """
     Upload a medicine label image and analyze it.
     
@@ -117,11 +120,13 @@ async def upload_and_analyze(file: UploadFile = File(...)):
         
         logger.info(f"Uploaded image: {file_path} ({file_size_mb:.2f}MB)")
         
-        # Analyze
-        user_input = {
+        # Analyze (optional registration hint from client, e.g. Streamlit manual field)
+        user_input: dict = {
             "image_path": file_path,
-            "reporter": file.filename
+            "reporter": file.filename,
         }
+        if registration_number and registration_number.strip():
+            user_input["registration_number"] = registration_number.strip()
         
         result = pipeline.analyze(user_input)
         
