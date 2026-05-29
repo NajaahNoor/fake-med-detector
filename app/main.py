@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
         os.makedirs(settings.upload_dir, exist_ok=True)
         
         # Migrate OpenFDA JSON to database
-        json_path = "./txt.json"
+        json_path = "./drug-ndc-0001-of-0001.json"
         if os.path.exists(json_path):
             db.migrate_json(json_path)
         else:

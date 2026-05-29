@@ -23,7 +23,8 @@ class RouterAgent:
         score: int,
         reasons: List[str],
         db_record: Optional[dict] = None,
-        brand_name: str = None
+        brand_name: str = None,
+        partial_matches: Optional[List[dict]] = None
     ) -> dict:
         """
         Format verification result into final response.
@@ -113,11 +114,18 @@ class RouterAgent:
                     "It is safe to use if obtained from authorized sources."
                 )
             elif verdict == "SUSPICIOUS":
-                message_parts.append(
-                    "⚠️ This medicine has some **discrepancies** in the database. "
-                    "Please verify the batch number and packaging carefully. "
-                    "Consider reporting to your health authority if concerns are confirmed."
-                )
+                if partial_matches:
+                    message_parts.append(
+                        "⚠️ The detected number matches an FDA NDC labeler prefix, "
+                        "but it is not a full product/package NDC. Please verify "
+                        "the complete NDC from the label before using this medicine."
+                    )
+                else:
+                    message_parts.append(
+                        "⚠️ This medicine has some **discrepancies** in the database. "
+                        "Please verify the batch number and packaging carefully. "
+                        "Consider reporting to your health authority if concerns are confirmed."
+                    )
             else:  # COUNTERFEIT
                 message_parts.append(
                     "🚨 This medicine is **classified as COUNTERFEIT**. "
@@ -138,6 +146,7 @@ class RouterAgent:
                 "registration_number": registration_number,
                 "brand_name": db_record.get("brand_name") if db_record else brand_name,
                 "drug_info": db_record,
+                "partial_matches": partial_matches or [],
                 "ingredients": self._format_ingredients(db_record) if db_record else None,
                 "flags": reasons,
                 "action": self._get_action(verdict)

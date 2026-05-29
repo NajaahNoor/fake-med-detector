@@ -203,6 +203,12 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Local PaddleOCR model/cache files
+data/.paddlex/
+data/.cache/
+data/.paddle/
+data/paddle_runtime/
+
 # Ruff stuff:
 .ruff_cache/
 

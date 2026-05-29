@@ -23,7 +23,7 @@ class LLMClient:
         self.current_model_idx = 0
         
         if not self.api_key:
-            raise AgentException("OPENROUTER_API_KEY not configured")
+            logger.warning("OPENROUTER_API_KEY not configured; LLM calls will be unavailable")
         
         logger.info(f"LLM Client initialized with models: {self.models}")
     
@@ -61,6 +61,9 @@ class LLMClient:
             LLM response text
         """
         # Build full message with system prompt
+        if not self.api_key:
+            raise AgentException("OPENROUTER_API_KEY not configured")
+
         full_messages = []
         if system_prompt:
             full_messages.append({"role": "system", "content": system_prompt})

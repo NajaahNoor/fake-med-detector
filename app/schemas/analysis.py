@@ -89,6 +89,10 @@ class AnalysisResponse(BaseModel):
     risk_score: Optional[int] = Field(None, description="Overall risk score")
     flags: List[str] = Field(default_factory=list, description="Risk flags or warnings")
     confidence: Optional[float] = Field(None, description="OCR confidence (0-1)")
+    partial_matches: List[dict] = Field(
+        default_factory=list,
+        description="Possible records for an incomplete NDC prefix"
+    )
     
     class Config:
         extra = "allow"  # Allow additional fields

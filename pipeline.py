@@ -25,10 +25,10 @@ try:
 except ImportError:
     LANGGRAPH_AVAILABLE = False
 
-from agents.intake_agent         import parse_input, IntakeData
-from agents.verification_agent   import verify_drug, VerificationResult
-from agents.router_agent         import route, RouterOutput
-from complaint.complaint_drafter import draft_complaint
+from .intake_agent         import parse_input, IntakeData
+from .verification_agent   import verify_drug, VerificationResult
+from .router_agent         import route, RouterOutput
+from complaint_drafter import draft_complaint
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def node_ocr(state: PipelineState) -> PipelineState:
         return state
 
     try:
-        from ocr.ocr_agent import extract_registration_number
+        from .ocr_agent import extract_registration_number
         result = extract_registration_number(intake.image_path)
         state["ocr_raw_text"]   = result.raw_text
         state["ocr_confidence"] = result.confidence

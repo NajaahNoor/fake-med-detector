@@ -50,12 +50,9 @@ class VerificationAgent:
             if not registration_number:
                 raise VerificationException("Registration number required")
             
-            # Lookup in database by application number or NDC
-            db_record = self.db.lookup_by_application(registration_number)
-            
-            # If not found, try by NDC
-            if not db_record:
-                db_record = self.db.lookup_by_ndc(registration_number)
+            # Lookup in database by application number, product NDC, or package NDC.
+            db_record = self.db.lookup_by_registration(registration_number)
+            partial_matches = []
             
             # If still not found and brand name provided, try searching by brand name
             if not db_record and brand_name:
@@ -67,8 +64,17 @@ class VerificationAgent:
             reasons = []
             
             if not db_record:
-                score += self.SCORE_NOT_FOUND
-                reasons.append("Drug not found in FDA database (unregistered)")
+                partial_matches = self.db.lookup_ndc_prefix(registration_number)
+                if partial_matches:
+                    score += self.SCORE_MISMATCH
+                    reasons.append(
+                        "Only a partial NDC labeler prefix was detected. "
+                        "The prefix exists in the FDA database, but the full "
+                        "product/package NDC is required to verify one medicine."
+                    )
+                else:
+                    score += self.SCORE_NOT_FOUND
+                    reasons.append("Drug not found in FDA database (unregistered)")
             else:
                 # Check if not finished (discontinued)
                 is_finished = db_record.get("is_finished", 1)
@@ -99,6 +105,7 @@ class VerificationAgent:
                 "score": score,
                 "reasons": reasons,
                 "db_record": dict(db_record) if db_record else None,
+                "partial_matches": partial_matches,
                 "confidence": 0.95 if db_record else 0.85
             }
             

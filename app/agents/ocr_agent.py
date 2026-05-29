@@ -17,6 +17,14 @@ from app.agents.prompts import OCR_AGENT_PROMPT
 # Set environment variables BEFORE importing PaddleOCR
 os.environ["FLAGS_use_onednn"] = str(settings.flags_use_onednn)
 os.environ["FLAGS_use_mkldnn"] = str(settings.flags_use_mkldnn)
+_paddle_runtime_dir = os.path.abspath("./data/paddle_runtime")
+os.environ["HOME"] = _paddle_runtime_dir
+os.environ["USERPROFILE"] = _paddle_runtime_dir
+os.environ.setdefault("PADDLE_PDX_CACHE_HOME", os.path.join(_paddle_runtime_dir, ".paddlex"))
+os.environ.setdefault("PADDLE_HOME", os.path.join(_paddle_runtime_dir, ".paddle"))
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(_paddle_runtime_dir, ".cache"))
+os.environ.setdefault("HF_HOME", os.path.join(_paddle_runtime_dir, ".cache", "huggingface"))
+os.environ.setdefault("MODELSCOPE_CACHE", os.path.join(_paddle_runtime_dir, ".cache", "modelscope"))
 
 try:
     from paddleocr import PaddleOCR
@@ -29,13 +37,29 @@ except ImportError:
 class OCRAgent:
     """Agent for extracting text from medicine label images."""
     
-    REG_NO_PATTERN = re.compile(r"\b(\d{5,7})\b")
+    REG_NO_PATTERN = re.compile(
+        r"\b(?:NDC\s*(?:NO\.?|#)?\s*[:#-]?\s*)?("
+        r"\d{4,5}[\s\-–—]?\d{3,5}(?:[\s\-–—]?\d{1,2})?"
+        r"|[A-Z]{2,6}\s?\d{3,6}"
+        r"|\d{5,12}"
+        r")\b",
+        re.IGNORECASE,
+    )
     
     def __init__(self):
         """Initialize OCR agent (lazy load model on first use)."""
         self.prompt = OCR_AGENT_PROMPT
         self.ocr_model = None
         self._model_loaded = False
+
+    def _clean_candidate(self, candidate: str) -> str:
+        """Clean OCR registration/NDC candidate text before lookup."""
+        cleaned = str(candidate or "").strip().upper()
+        cleaned = cleaned.replace("–", "-").replace("—", "-")
+        cleaned = re.sub(r"^(?:NDC|NDC\s*NO\.?|NDC\s*#)\s*[:#-]?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*-\s*", "-", cleaned)
+        cleaned = re.sub(r"\s+", "", cleaned)
+        return cleaned
     
     def _load_ocr_model(self):
         """Load PP-OCRv5 model with workaround for OneDNN issues."""
@@ -49,8 +73,9 @@ class OCRAgent:
         try:
             logger.info("Loading PP-OCR model...")
             ocr = PaddleOCR(
-                ocr_version=settings.ocr_version,
-                use_angle_cls=settings.ocr_use_angle_cls,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
                 lang=settings.ocr_lang,
             )
             self.ocr_model = ocr
@@ -175,9 +200,15 @@ class OCRAgent:
             # Log the extracted text for debugging
             logger.info(f"OCR extracted text: {raw_text[:200] if raw_text else 'EMPTY'}")
             
-            # Extract registration number using regex
-            reg_match = self.REG_NO_PATTERN.search(raw_text)
-            registration_number = reg_match.group(1) if reg_match else None
+            # Extract registration/NDC candidates. OCR can see batch numbers,
+            # dates, prices, or counts before the actual package NDC, so keep
+            # every candidate and let verification choose the DB hit.
+            registration_candidates = []
+            for match in self.REG_NO_PATTERN.finditer(raw_text):
+                candidate = self._clean_candidate(match.group(1))
+                if candidate and candidate not in registration_candidates:
+                    registration_candidates.append(candidate)
+            registration_number = registration_candidates[0] if registration_candidates else None
             
             logger.info(
                 f"OCR complete - Found reg_no: {registration_number}, "
@@ -186,6 +217,7 @@ class OCRAgent:
             
             return {
                 "registration_number": registration_number,
+                "registration_candidates": registration_candidates,
                 "product_name": None,  # Could be extracted with more sophisticated NLP
                 "raw_text": raw_text,
                 "confidence": avg_confidence

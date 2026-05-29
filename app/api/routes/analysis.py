@@ -61,7 +61,8 @@ async def analyze_drug(request: AnalysisRequest):
             ingredients=result.get("ingredients"),
             risk_score=result.get("score"),
             flags=result.get("flags", []),
-            confidence=result.get("ocr_confidence")
+            confidence=result.get("ocr_confidence"),
+            partial_matches=result.get("partial_matches", [])
         )
         
         return response
@@ -141,7 +142,8 @@ async def upload_and_analyze(
             ingredients=result.get("ingredients"),
             risk_score=result.get("score"),
             flags=result.get("flags", []),
-            confidence=result.get("ocr_confidence")
+            confidence=result.get("ocr_confidence"),
+            partial_matches=result.get("partial_matches", [])
         )
         
         return response

@@ -30,13 +30,17 @@ async def health_check():
 @router.get("/status")
 async def get_status():
     """Get detailed system status."""
+    db_stats = db.get_stats()
     return {
         "app_name": settings.app_name,
         "version": settings.app_version,
         "debug": settings.debug,
         "database": {
-            "path": settings.db_path,
-            "connected": db.is_healthy()
+            "path": db_stats["path"],
+            "connected": db.is_healthy(),
+            "source_json": "drug-ndc-0001-of-0001.json",
+            "drug_count": db_stats["drug_count"],
+            "package_count": db_stats["package_count"]
         },
         "llm": {
             "primary_model": settings.primary_model,

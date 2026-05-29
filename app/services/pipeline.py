@@ -49,6 +49,7 @@ class AnalysisPipeline:
             
             ocr_confidence = 0.0
             ocr_text = ""
+            registration_candidates = []
             
             # Step 2: OCR (if image provided)
             if image_path:
@@ -56,7 +57,10 @@ class AnalysisPipeline:
                 try:
                     ocr_result = self.ocr.process(image_path)
                     if ocr_result.get("registration_number"):
-                        registration_number = ocr_result["registration_number"]
+                        registration_candidates = ocr_result.get("registration_candidates", [])
+                        if registration_number:
+                            registration_candidates = [registration_number] + registration_candidates
+                        registration_number = self._select_registration_number(registration_candidates)
                     ocr_text = ocr_result.get("raw_text", "")
                     ocr_confidence = ocr_result.get("confidence", 0.0)
                     logger.info(f"OCR extracted: reg={registration_number}, conf={ocr_confidence:.2f}")
@@ -87,7 +91,8 @@ class AnalysisPipeline:
                 score=verification_result["score"],
                 reasons=verification_result["reasons"],
                 db_record=verification_result["db_record"],
-                brand_name=product_name or intake_result.get("product_name")
+                brand_name=product_name or intake_result.get("product_name"),
+                partial_matches=verification_result.get("partial_matches", [])
             )
             
             # Add metadata
@@ -114,6 +119,26 @@ class AnalysisPipeline:
             "flags": [],
             "action": "REVIEW"
         }
+
+    def _select_registration_number(self, candidates: list[str]) -> str | None:
+        """Pick the first OCR/manual candidate that exists in the database."""
+        seen = set()
+        unique_candidates = []
+        for candidate in candidates:
+            candidate = str(candidate).strip()
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                unique_candidates.append(candidate)
+
+        for candidate in unique_candidates:
+            if (
+                self.verification.db.lookup_by_application(candidate)
+                or self.verification.db.lookup_by_ndc(candidate)
+            ):
+                logger.info(f"Selected DB-matched registration candidate: {candidate}")
+                return candidate
+
+        return unique_candidates[0] if unique_candidates else None
 
 
 # Global pipeline instance

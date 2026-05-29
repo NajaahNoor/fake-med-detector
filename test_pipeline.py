@@ -25,9 +25,9 @@ def test_pipeline():
     # Test 1: Check database
     logger.info("\n[TEST 1] Database Connection")
     if db.is_healthy():
-        logger.info("✅ Database is healthy")
+        logger.info("[OK] Database is healthy")
     else:
-        logger.error("❌ Database connection failed")
+        logger.error("[ERROR] Database connection failed")
         return
     
     # Test 2: Lookup a known drug
@@ -35,10 +35,10 @@ def test_pipeline():
     test_reg = "134108"  # From CSV: Axaleo 400mg
     record = db.lookup_by_registration(test_reg)
     if record:
-        logger.info(f"✅ Found drug: {record.get('product_name')}")
+        logger.info(f"[OK] Found drug: {record.get('product_name')}")
         logger.info(f"   Company: {record.get('company_name')}")
     else:
-        logger.warning(f"⚠️ Drug not found: {test_reg}")
+        logger.warning(f"[WARN] Drug not found: {test_reg}")
     
     # Test 3: Analyze with registration number
     logger.info("\n[TEST 3] Analysis - With Registration Number")

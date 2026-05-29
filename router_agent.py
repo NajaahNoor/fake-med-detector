@@ -8,7 +8,7 @@ Routes a VerificationResult to one of three output actions:
   COMPLAINT → trigger the complaint-drafting module
 """
 
-from agents.verification_agent import VerificationResult
+from .verification_agent import VerificationResult
 
 
 class RouterOutput:

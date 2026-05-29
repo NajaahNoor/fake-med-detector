@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dataclasses import dataclass, field
 from typing import Optional
 
-from database.db_manager import lookup_by_registration
+from .db_manager import lookup_by_registration
 
 
 SCORE_NOT_FOUND  = 40
