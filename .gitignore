@@ -7,8 +7,9 @@ __pycache__/
 *.so
 
 # databases
-.json
-.db
+data/drap.db
+drug-ndc-0001-of-0001.json
+*.db
 
 # Distribution / packaging
 .Python
