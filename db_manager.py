@@ -4,10 +4,11 @@ database/db_manager.py
 Query helpers for the DRAP SQLite database.
 """
 import os
+import re
 import sqlite3
 from typing import Optional
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "data", "drap.db")
 
 
@@ -17,16 +18,50 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _normalize_lookup_value(value: str) -> tuple[str, str]:
+    exact = str(value or "").strip().upper()
+    exact = exact.replace("–", "-").replace("—", "-")
+    exact = re.sub(r"^(?:NDC|NDC\s*NO\.?|NDC\s*#)\s*[:#-]?\s*", "", exact)
+    compact = re.sub(r"[^A-Z0-9]", "", exact)
+    return exact, compact
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    return any(row[1] == column for row in cursor.fetchall())
+
+
 def lookup_by_registration(reg_no: str) -> Optional[dict]:
     """Return a dict with drug details, or None if not found."""
-    reg_no = str(reg_no).strip()
+    reg_no, compact = _normalize_lookup_value(reg_no)
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM drugs WHERE TRIM(registration_number) = ?",
-            (reg_no,)
-        ).fetchone()
-        return dict(row) if row else None
+        if _has_column(conn, "drugs", "registration_number"):
+            row = conn.execute(
+                "SELECT * FROM drugs WHERE TRIM(registration_number) = ?",
+                (reg_no,)
+            ).fetchone()
+            if row:
+                return dict(row)
+
+        if _has_column(conn, "drugs", "product_ndc"):
+            row = conn.execute(
+                """
+                SELECT drugs.*, drug_packages.package_ndc AS matched_package_ndc,
+                       drug_packages.description AS package_description
+                FROM drugs
+                LEFT JOIN drug_packages ON drugs.product_ndc = drug_packages.product_ndc
+                WHERE TRIM(drugs.product_ndc) = ?
+                   OR REPLACE(REPLACE(TRIM(drugs.product_ndc), '-', ''), ' ', '') = ?
+                   OR TRIM(drug_packages.package_ndc) = ?
+                   OR REPLACE(REPLACE(TRIM(drug_packages.package_ndc), '-', ''), ' ', '') = ?
+                """,
+                (reg_no, compact, reg_no, compact),
+            ).fetchone()
+            if row:
+                return dict(row)
+
+        return None
     finally:
         conn.close()
 

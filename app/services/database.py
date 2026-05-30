@@ -17,11 +17,15 @@ from app.core.exceptions import DatabaseException
 class Database:
     """SQLite database wrapper with FDA JSON support."""
     
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    DEFAULT_JSON_PATH = os.path.join(PROJECT_ROOT, "drug-ndc-0001-of-0001.json")
+
     def __init__(self, db_path: str = None):
         """Initialize database connection."""
         self.db_path = db_path or settings.db_path
         self._ensure_db_directory()
         self._init_db()
+        self._auto_migrate_json()
     
     def _ensure_db_directory(self):
         """Ensure database directory exists."""
@@ -89,6 +93,31 @@ class Database:
             return conn
         except sqlite3.Error as e:
             raise DatabaseException(f"Failed to connect to database: {e}")
+
+    def _count_drugs(self) -> int:
+        """Return the current drug count in the database."""
+        conn = self._get_connection()
+        try:
+            return conn.execute("SELECT COUNT(*) FROM drugs").fetchone()[0]
+        finally:
+            conn.close()
+
+    def _auto_migrate_json(self):
+        """Auto-migrate JSON data into SQLite when the database is empty."""
+        try:
+            if self._count_drugs() == 0:
+                json_path = self.DEFAULT_JSON_PATH
+                if os.path.exists(json_path):
+                    logger.info(
+                        "Empty database detected, auto-migrating drug JSON data into SQLite."
+                    )
+                    self.migrate_json(json_path)
+                else:
+                    logger.warning(
+                        f"Database is empty and JSON source not found: {json_path}"
+                    )
+        except Exception as e:
+            logger.warning(f"Auto-migration skipped: {e}")
 
     def _normalize_lookup_value(self, value: str) -> tuple[str, str]:
         """Normalize OCR/user-entered NDC/application values for lookup."""
@@ -210,8 +239,9 @@ class Database:
                 SELECT * FROM drugs
                 WHERE TRIM(product_ndc) = ?
                    OR REPLACE(REPLACE(TRIM(product_ndc), '-', ''), ' ', '') = ?
+                   OR REPLACE(REPLACE(REPLACE(TRIM(product_ndc), '-', ''), ' ', ''), '/', '') = ?
                 """,
-                (ndc, ndc_compact)
+                (ndc, ndc_compact, ndc_compact)
             )
             row = cursor.fetchone()
             if not row:
@@ -222,7 +252,8 @@ class Database:
                     JOIN drugs ON drugs.product_ndc = drug_packages.product_ndc
                     WHERE TRIM(drug_packages.package_ndc) = ?
                        OR REPLACE(REPLACE(TRIM(drug_packages.package_ndc), '-', ''), ' ', '') = ?
-                """, (ndc, ndc_compact))
+                       OR REPLACE(REPLACE(REPLACE(TRIM(drug_packages.package_ndc), '-', ''), ' ', ''), '/', '') = ?
+                """, (ndc, ndc_compact, ndc_compact))
                 row = cursor.fetchone()
             conn.close()
             return dict(row) if row else None
